@@ -1,0 +1,39 @@
+{
+  "name": "msoffice-templater",
+  "version": "0.0.1",
+  "description": "Generate Microsoft Office file based on templates.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "github.com/zhangkekf/msoffice-templater"
+  },
+  "keywords": [
+    "docx",
+    "xlsx",
+    "pptx",
+    "templates",
+    "template",
+    "templater",
+    "templating",
+    "report",
+    "generation",
+    "generate",
+    "generator",
+    "office",
+    "word",
+    "powerpoint",
+    "microsoft",
+    "excel",
+    "create",
+    "make",
+    "generate",
+    "Office",
+    "OpenXML",
+    "creator"
+  ],
+  "author": "张珂(keke2004victory@163.com)",
+  "license": "GPL-3.0"
+}
