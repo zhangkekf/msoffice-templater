@@ -35,5 +35,9 @@
     "creator"
   ],
   "author": "张珂(keke2004victory@163.com)",
-  "license": "GPL-3.0"
+  "license": "GPL-3.0",
+  "dependencies": {
+    "adm-zip": "^0.5.14",
+    "xml2js": "^0.6.2"
+  }
 }
