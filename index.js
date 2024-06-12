@@ -3,7 +3,7 @@ const xml2js = require('xml2js');
 const util =  require('node:util');
 const default_opt = {
     delimiter: ["{{", "}}"],
-    loop_stack: []
+    line_break_index: []
 }
 function escapeXml(unsafe) {
     return unsafe.replace(/[<>&'"]/g, function (c) {
@@ -62,10 +62,48 @@ let paragraph_arr_process = function (paragraph_arr, data, opt, func) {
     if (paragraph_arr.length === 0) {
         return;
     }
+
+    if (func.hasOwnProperty("paragraph_arr_process")) {
+        return func.paragraph_arr_process(paragraph_arr, data, opt, func);
+    }
     for (let paragraph_obj of paragraph_arr) {
         paragraph_process(paragraph_obj, data, opt, func);
 
+        // // 处理可能出现的段落调整
+        // if (opt.line_break_index.length > 0) {
+        //     let new
+        //     for (let index = 0; index < paragraph_obj["w:r"].length; ++ index) {
+        //         paragraph_obj["w:r"][index]
+        //     }
+        // }
     }
+}
+
+let paragraph_arr_process_for_split = function (paragraph_arr, data, opt, func) {
+    let new_paragraph_arr = [];
+    for (let paragraph_obj of paragraph_arr) {
+        paragraph_process(paragraph_obj, data, opt, func);
+
+        // 处理可能出现的段落调整
+        let new_run_arr = [];
+        for (let index = 0; index < paragraph_obj["w:r"].length; ++ index) {
+            new_run_arr.push(paragraph_obj["w:r"][index]);
+            if (paragraph_obj["w:r"][index].hasOwnProperty("line_break")
+            && paragraph_obj["w:r"][index]["line_break"]) {
+                new_paragraph_arr.push({
+                    "w:r": new_run_arr
+                });
+                new_run_arr = [];
+                delete paragraph_obj["w:r"][index]["line_break"];
+            }
+        }
+        if (new_run_arr.length > 0) {
+            new_paragraph_arr.push({
+                "w:r": new_run_arr
+            });
+        }
+    }
+    return new_paragraph_arr;
 }
 
 let paragraph_process = function (paragraph_obj, data, opt, func) {
@@ -79,10 +117,13 @@ let run_arr_process = function (run_arr, data, opt, func) {
         return;
     }
 
-    return func(run_arr, data, opt);
+    if (func.hasOwnProperty("run_arr_process")) {
+        return func.run_arr_process(run_arr, data, opt, func);
+    }
 }
 // 检查每一个run，查看里面是否需要分段
-let paragraph_split = function (run_arr, data, opt) {
+let run_arr_process_paragraph_split = function (run_arr, data, opt) {
+    opt.line_break_index = [];
     let new_run_arr = [];
     for (let index = 0; index < run_arr.length; ++ index) {
         if (!run_arr[index]["w:t"][0].hasOwnProperty("_")) {
@@ -90,19 +131,45 @@ let paragraph_split = function (run_arr, data, opt) {
             continue;
         }
 
-        let matched_arr = run_arr[index]["w:t"][0]["_"].match(/(?<=&lt;p&gt;).*?(?=&lt;\/p&gt;)/g);
+        // let matched_arr = run_arr[index]["w:t"][0]["_"].match(/(?<=&lt;p&gt;).*?(?=&lt;\/p&gt;)/g);
+        let matched_arr = run_arr[index]["w:t"][0]["_"].match(/(?<=<p>).*?(?=<\/p>)/g);
         if (!matched_arr) {
             new_run_arr.push(run_arr[index]);
             continue;
         }
+        let pos = run_arr[index]["w:t"][0]["_"].indexOf("<p>");
+        let left = run_arr[index]["w:t"][0]["_"].substring(0, pos);
+        pos = run_arr[index]["w:t"][0]["_"].lastIndexOf("<\/p>");
+        let right = run_arr[index]["w:t"][0]["_"].substring(pos + "<\/p>".length);
+
+        if (left !== "") {
+            let run = {};
+            if (run_arr[index].hasOwnProperty("w:rPr")) {
+                run["w:rPr"] = run_arr[index]["w:rPr"];
+            }
+            run["w:t"] = [left];
+            run["line_break"] = true;
+            new_run_arr.push(run);
+        }
         for (let matched of matched_arr) {
-            new_run_arr.push({
-                "w:t": matched,
-                "w:rFonts": run_arr[index]["w:rFonts"]
-            });
+            let run = {};
+            if (run_arr[index].hasOwnProperty("w:rPr")) {
+                run["w:rPr"] = run_arr[index]["w:rPr"];
+            }
+            run["w:t"] = [matched];
+            run["line_break"] = true;
+            new_run_arr.push(run);
+        }
+        if (right !== "") {
+            let run = {};
+            if (run_arr[index].hasOwnProperty("w:rPr")) {
+                run["w:rPr"] = run_arr[index]["w:rPr"];
+            }
+            run["w:t"] = [right];
+            new_run_arr.push(run);
         }
     }
-    return [new_run_arr, null];
+    return new_run_arr;
 }
 
 
@@ -116,7 +183,7 @@ let paragraph_split = function (run_arr, data, opt) {
 // }
 
 // 检查每一个run，合并属性一样的run，产生新的数组
-let merge_runs_by_rPr = function (run_arr, data, opt) {
+let run_arr_process_merge_runs_by_rPr = function (run_arr, data, opt) {
     let new_run_arr = [run_arr[0]];
     for (let index = 1; index < run_arr.length; ++ index) {
         if (!cmp_run_rPr(new_run_arr[new_run_arr.length - 1], run_arr[index])) {
@@ -145,8 +212,12 @@ let cmp_run_rPr = function (run_a, run_b) {
 }
 
 let cmp_rPr = function (rPr_a_arr, rPr_b_arr) {
-    if (rPr_a_arr === undefined || rPr_b_arr === undefined) {
+    if (rPr_a_arr === undefined && rPr_b_arr === undefined) {
         return true;
+    }
+
+    if (rPr_a_arr === undefined || rPr_b_arr === undefined) {
+        return false;
     }
 
     let rPr_a = rPr_a_arr[0];
@@ -258,7 +329,7 @@ let replace_with_extend = function (template, data, opt) {
 }
 
 // // 利用正则表达式来展开需要分段的部分
-// let paragraph_split = function (template, data, opt) {
+// let run_arr_process_paragraph_split = function (template, data, opt) {
 //     if (template === undefined || template === "") {
 //         return template;
 //     }
@@ -305,7 +376,9 @@ let render_docx = async function (template, data, opt){
     });
 
     // 先合并相同的run
-    body_arr_process(document_obj["w:document"]["w:body"], data, opt, merge_runs_by_rPr);
+    body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
+        run_arr_process: run_arr_process_merge_runs_by_rPr
+    });
 
     // 再还原出xml
     let xml2js_builder = new xml2js.Builder({
@@ -318,9 +391,16 @@ let render_docx = async function (template, data, opt){
     // 利用正则表达式来展开循环，替换placeholder
     document_xml = replace_with_extend(document_xml, data, opt);
 
-    // 利用正则表达式来展开需要分段的部分
-    // body_arr_process(document_obj["w:document"]["w:body"], data, opt, paragraph_split);
+    // 再次解析，来解析内容中的html字符
+    document_obj = await parser.parseStringPromise(document_xml).then(function (result) {
+        return result;
+    });
+    body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
+        paragraph_arr_process: paragraph_arr_process_for_split,
+        run_arr_process: run_arr_process_paragraph_split
+    });
 
+    document_xml = xml2js_builder.buildObject(document_obj);
     // download image
     // let [err, buf_image] = await utils.download("https://pics1.baidu.com/feed/9d82d158ccbf6c8176395c9eed85af3b32fa4087.jpeg");
     // if (err) {
