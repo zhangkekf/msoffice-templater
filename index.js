@@ -81,7 +81,7 @@ let paragraph_arr_process = function (paragraph_arr, data, opt, func) {
     return paragraph_arr;
 }
 
-let paragraph_arr_process_for_split = function (paragraph_arr, data, opt, func) {
+let paragraph_arr_process_for_html_paragraph_split = function (paragraph_arr, data, opt, func) {
     let new_paragraph_arr = [];
     for (let paragraph_obj of paragraph_arr) {
         if (!paragraph_obj.hasOwnProperty("w:r")) {
@@ -128,7 +128,7 @@ let run_arr_process = function (run_arr, data, opt, func) {
     }
 }
 // 检查每一个run，查看里面是否需要分段
-let run_arr_process_paragraph_split = function (run_arr, data, opt) {
+let run_arr_process_for_html_paragraph_split = function (run_arr, data, opt) {
     opt.line_break_index = [];
     let new_run_arr = [];
     for (let index = 0; index < run_arr.length; ++ index) {
@@ -137,12 +137,12 @@ let run_arr_process_paragraph_split = function (run_arr, data, opt) {
             continue;
         }
 
-        // let matched_arr = run_arr[index]["w:t"][0]["_"].match(/(?<=&lt;p&gt;).*?(?=&lt;\/p&gt;)/g);
         let matched_arr = run_arr[index]["w:t"][0]["_"].match(/(?<=<p>).*?(?=<\/p>)/g);
         if (!matched_arr) {
             new_run_arr.push(run_arr[index]);
             continue;
         }
+
         let pos = run_arr[index]["w:t"][0]["_"].indexOf("<p>");
         let left = run_arr[index]["w:t"][0]["_"].substring(0, pos);
         pos = run_arr[index]["w:t"][0]["_"].lastIndexOf("<\/p>");
@@ -153,7 +153,7 @@ let run_arr_process_paragraph_split = function (run_arr, data, opt) {
             if (run_arr[index].hasOwnProperty("w:rPr")) {
                 run["w:rPr"] = run_arr[index]["w:rPr"];
             }
-            run["w:t"] = [left];
+            run["w:t"] = [{"_": left}];
             new_run_arr.push(run);
         }
         for (let i = 0; i < matched_arr.length; ++ i) {
@@ -161,7 +161,7 @@ let run_arr_process_paragraph_split = function (run_arr, data, opt) {
             if (run_arr[index].hasOwnProperty("w:rPr")) {
                 run["w:rPr"] = run_arr[index]["w:rPr"];
             }
-            run["w:t"] = [matched_arr[i]];
+            run["w:t"] = [{"_": matched_arr[i]}];
             if (i < matched_arr.length - 1) {
                 run["line_break"] = true;
             }
@@ -179,7 +179,75 @@ let run_arr_process_paragraph_split = function (run_arr, data, opt) {
     return new_run_arr;
 }
 
+let replace_html_tag = function (run, data, opt) {
+    if (!run.hasOwnProperty("w:t") || run["w:t"].length === 0 || !run["w:t"][0].hasOwnProperty("_")) {
+        return [run];
+    }
+    let new_run_arr = [];
+    let matched_arr = run["w:t"][0]["_"].match(/(?<=<u>).*?(?=<\/u>)/g);
+    if (!matched_arr) {
+        new_run_arr.push(run);
+        return [run];
+    }
 
+    let pos = run["w:t"][0]["_"].indexOf("<u>");
+    let left = run["w:t"][0]["_"].substring(0, pos);
+    pos = run["w:t"][0]["_"].indexOf("<\/u>");
+    let right = run["w:t"][0]["_"].substring(pos + "<\/u>".length);
+
+    // for left
+    if (left !== "") {
+        let run_tmp = {};
+        if (run.hasOwnProperty("w:rPr")) {
+            run_tmp["w:rPr"] = JSON.parse(JSON.stringify(run["w:rPr"]));
+        }
+        run_tmp["w:t"] = [{"_": left}];
+        new_run_arr.push(run_tmp);
+        run_tmp = undefined;
+    }
+
+    // for middle matched
+    let run_tmp = {};
+    if (run.hasOwnProperty("w:rPr")) {
+        run_tmp["w:rPr"] = JSON.parse(JSON.stringify(run["w:rPr"]));
+    }
+    else {
+        run_tmp["w:rPr"] = [{}];
+    }
+
+    let w_u = [{
+        "$": {
+            "w:val": "single"
+        }
+    }];
+    if (typeof run_tmp["w:rPr"][0] === "object") {
+        run_tmp["w:rPr"][0]["w:u"] = w_u
+    } else {
+        run_tmp["w:rPr"][0] = {
+            "w:u": w_u
+        }
+    }
+    run_tmp["w:t"] = [{"_": matched_arr[0]}];
+    new_run_arr.push(run_tmp);
+
+    // for right
+    let right_run_arr = [];
+    if (right !== "") {
+        run["w:t"][0]["_"] = right;
+        right_run_arr = replace_html_tag(run, data, opt);
+        new_run_arr = new_run_arr.concat(right_run_arr);
+    }
+    return new_run_arr;
+}
+
+let run_arr_process_for_html_tag = function (run_arr, data, opt) {
+    let new_run_arr = [];
+    for (let index = 0; index < run_arr.length; ++ index) {
+        let new_run_arr_tmp = replace_html_tag(run_arr[index], data, opt);
+        new_run_arr = new_run_arr.concat(new_run_arr_tmp);
+    }
+    return new_run_arr;
+}
 // let run_process = function (run_arr, data, opt) {
 //     for (let run_obj of run_arr) {
 //         if (run_obj.hasOwnProperty("w:t") && typeof run_obj["w:t"][0] !== "object") {
@@ -335,40 +403,6 @@ let replace_with_extend = function (template, data, opt) {
     return left_str + middle_result + right_str;
 }
 
-// // 利用正则表达式来展开需要分段的部分
-// let run_arr_process_paragraph_split = function (template, data, opt) {
-//     if (template === undefined || template === "") {
-//         return template;
-//     }
-//     let reg_str = escapeRegExp('&lt;p&gt;' + "\#.*?" + '&lt;/p&gt;');
-//     let reg = new RegExp(reg_str, "g");
-//     let matched_arr = template.match(reg);
-//     if (!matched_arr) {
-//         return template;
-//     }
-//     for (let matched of matched_arr) {
-//         template.replaceAll(matched, escapeXml(data[variable_name]));
-//     }
-//     let left_str = template.slice(0, template.indexOf(loop_matched));
-//     let right_str = template.substring(template.indexOf(loop_matched) + loop_matched.length);
-//     let loop_variable_name = loop_matched.slice(opt.delimiter[0].length + 1, 0 - opt.delimiter[1].length);
-//     let delimiter_tmp = opt.delimiter[0] + "\/" + loop_variable_name + opt.delimiter[1]
-//     let pos = right_str.indexOf(delimiter_tmp);
-//     let middle_str = right_str.slice(0, pos);
-//     right_str = right_str.slice(pos + delimiter_tmp.length);
-//
-//     left_str = replace_hold(left_str, data, opt);
-//     right_str = replace_with_extend(right_str, data, opt);
-//     let middle_result = "";
-//     if (data.hasOwnProperty(loop_variable_name)) {
-//         let count = data[loop_variable_name].length
-//         for (let index = 0; index < count; ++ index) {
-//             middle_result += replace_with_extend(middle_str, data[loop_variable_name][index], opt);
-//         }
-//     }
-//     return left_str + middle_result + right_str;
-// }
-
 let render_docx = async function (template, data, opt){
     opt = Object.assign(default_opt, opt);
     const zip = new adm_zip(template);
@@ -390,7 +424,7 @@ let render_docx = async function (template, data, opt){
     // 再还原出xml
     let xml2js_builder = new xml2js.Builder({
         renderOpts: {
-            pretty: false
+            pretty: true
         }
     });
     document_xml = xml2js_builder.buildObject(document_obj);
@@ -398,13 +432,18 @@ let render_docx = async function (template, data, opt){
     // 利用正则表达式来展开循环，替换placeholder
     document_xml = replace_with_extend(document_xml, data, opt);
 
-    // 再次解析，来解析内容中的html字符
+    // 再次解析，
     document_obj = await parser.parseStringPromise(document_xml).then(function (result) {
         return result;
     });
     body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
-        paragraph_arr_process: paragraph_arr_process_for_split,
-        run_arr_process: run_arr_process_paragraph_split
+        paragraph_arr_process: paragraph_arr_process_for_html_paragraph_split,
+        run_arr_process: run_arr_process_for_html_paragraph_split
+    });
+
+    // 解析内容中的html<u>字符
+    body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
+        run_arr_process: run_arr_process_for_html_tag
     });
 
     document_xml = xml2js_builder.buildObject(document_obj);
