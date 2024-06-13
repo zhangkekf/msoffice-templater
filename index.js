@@ -6,6 +6,7 @@ const default_opt = {
     line_break_index: []
 }
 function escapeXml(unsafe) {
+    unsafe = unsafe.toString();
     return unsafe.replace(/[<>&'"]/g, function (c) {
         switch (c) {
             case '<': return '&lt;';
@@ -54,13 +55,13 @@ let body_arr_process = function (body_arr, data, opt, func) {
 }
 let body_process = function (body_obj, data, opt, func) {
     if (body_obj.hasOwnProperty("w:p")) {
-        paragraph_arr_process(body_obj["w:p"], data, opt, func);
+        body_obj["w:p"] = paragraph_arr_process(body_obj["w:p"], data, opt, func);
     }
 }
 
 let paragraph_arr_process = function (paragraph_arr, data, opt, func) {
     if (paragraph_arr.length === 0) {
-        return;
+        return paragraph_arr;
     }
 
     if (func.hasOwnProperty("paragraph_arr_process")) {
@@ -77,11 +78,16 @@ let paragraph_arr_process = function (paragraph_arr, data, opt, func) {
         //     }
         // }
     }
+    return paragraph_arr;
 }
 
 let paragraph_arr_process_for_split = function (paragraph_arr, data, opt, func) {
     let new_paragraph_arr = [];
     for (let paragraph_obj of paragraph_arr) {
+        if (!paragraph_obj.hasOwnProperty("w:r")) {
+            new_paragraph_arr.push(paragraph_obj);
+            continue;
+        }
         paragraph_process(paragraph_obj, data, opt, func);
 
         // 处理可能出现的段落调整
@@ -114,7 +120,7 @@ let paragraph_process = function (paragraph_obj, data, opt, func) {
 
 let run_arr_process = function (run_arr, data, opt, func) {
     if (run_arr.length === 0) {
-        return;
+        return run_arr;
     }
 
     if (func.hasOwnProperty("run_arr_process")) {
@@ -148,16 +154,17 @@ let run_arr_process_paragraph_split = function (run_arr, data, opt) {
                 run["w:rPr"] = run_arr[index]["w:rPr"];
             }
             run["w:t"] = [left];
-            run["line_break"] = true;
             new_run_arr.push(run);
         }
-        for (let matched of matched_arr) {
+        for (let i = 0; i < matched_arr.length; ++ i) {
             let run = {};
             if (run_arr[index].hasOwnProperty("w:rPr")) {
                 run["w:rPr"] = run_arr[index]["w:rPr"];
             }
-            run["w:t"] = [matched];
-            run["line_break"] = true;
+            run["w:t"] = [matched_arr[i]];
+            if (i < matched_arr.length - 1) {
+                run["line_break"] = true;
+            }
             new_run_arr.push(run);
         }
         if (right !== "") {
