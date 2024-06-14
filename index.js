@@ -1,9 +1,38 @@
 const adm_zip = require('adm-zip');
 const xml2js = require('xml2js');
 const util =  require('node:util');
+const https = require('https');
+const http = require('http');
+const uuid = require('uuid');
 const default_opt = {
     delimiter: ["{{", "}}"],
     line_break_index: []
+}
+async function download(url) {
+    return new Promise((resolve, reject) => {
+        let http_sender;
+        if (url.substring(0, "https".length) === "https") {
+            http_sender = https;
+        } else {
+            http_sender = http;
+        }
+        http_sender.get(url, (res) => {
+            let image_data = "";
+            res.setEncoding("binary");
+            res.on('data', (chunk) => {
+                image_data += chunk;
+            });
+            res.on('end', () => {
+                return resolve(image_data);
+            });
+        }).on("error", function () {
+            reject("error");
+        });
+    }).then(data => {
+        return [null, data];
+    }).catch(error => {
+        return [error, null];
+    })
 }
 function escapeXml(unsafe) {
     unsafe = unsafe.toString();
@@ -45,30 +74,30 @@ function flat(obj = {}, preKey = "", res = {}) {
     return res;
 }
 
-let body_arr_process = function (body_arr, data, opt, func) {
+let body_arr_process = async function (body_arr, data, opt, func) {
     if (body_arr.length === 0) {
         return;
     }
     for (let body_obj of body_arr) {
-        body_process(body_obj, data, opt, func);
+        await body_process(body_obj, data, opt, func);
     }
 }
-let body_process = function (body_obj, data, opt, func) {
+let body_process = async function (body_obj, data, opt, func) {
     if (body_obj.hasOwnProperty("w:p")) {
-        body_obj["w:p"] = paragraph_arr_process(body_obj["w:p"], data, opt, func);
+        body_obj["w:p"] = await paragraph_arr_process(body_obj["w:p"], data, opt, func);
     }
 }
 
-let paragraph_arr_process = function (paragraph_arr, data, opt, func) {
+let paragraph_arr_process = async function (paragraph_arr, data, opt, func) {
     if (paragraph_arr.length === 0) {
         return paragraph_arr;
     }
 
     if (func.hasOwnProperty("paragraph_arr_process")) {
-        return func.paragraph_arr_process(paragraph_arr, data, opt, func);
+        return await func.paragraph_arr_process(paragraph_arr, data, opt, func);
     }
     for (let paragraph_obj of paragraph_arr) {
-        paragraph_process(paragraph_obj, data, opt, func);
+        await paragraph_process(paragraph_obj, data, opt, func);
 
         // // 处理可能出现的段落调整
         // if (opt.line_break_index.length > 0) {
@@ -81,14 +110,14 @@ let paragraph_arr_process = function (paragraph_arr, data, opt, func) {
     return paragraph_arr;
 }
 
-let paragraph_arr_process_for_html_paragraph_split = function (paragraph_arr, data, opt, func) {
+let paragraph_arr_process_for_html_paragraph_split = async function (paragraph_arr, data, opt, func) {
     let new_paragraph_arr = [];
     for (let paragraph_obj of paragraph_arr) {
         if (!paragraph_obj.hasOwnProperty("w:r")) {
             new_paragraph_arr.push(paragraph_obj);
             continue;
         }
-        paragraph_process(paragraph_obj, data, opt, func);
+        await paragraph_process(paragraph_obj, data, opt, func);
 
         // 处理可能出现的段落调整
         let new_run_arr = [];
@@ -112,27 +141,27 @@ let paragraph_arr_process_for_html_paragraph_split = function (paragraph_arr, da
     return new_paragraph_arr;
 }
 
-let paragraph_process = function (paragraph_obj, data, opt, func) {
+let paragraph_process = async function (paragraph_obj, data, opt, func) {
     if (paragraph_obj.hasOwnProperty("w:r")) {
-        paragraph_obj["w:r"] = run_arr_process(paragraph_obj["w:r"], data, opt, func);
+        paragraph_obj["w:r"] = await run_arr_process(paragraph_obj["w:r"], data, opt, func);
     }
 }
 
-let run_arr_process = function (run_arr, data, opt, func) {
+let run_arr_process = async function (run_arr, data, opt, func) {
     if (run_arr.length === 0) {
         return run_arr;
     }
 
     if (func.hasOwnProperty("run_arr_process")) {
-        return func.run_arr_process(run_arr, data, opt, func);
+        return await func.run_arr_process(run_arr, data, opt, func);
     }
 }
 // 检查每一个run，查看里面是否需要分段
-let run_arr_process_for_html_paragraph_split = function (run_arr, data, opt) {
+let run_arr_process_for_html_paragraph_split = async function (run_arr, data, opt) {
     opt.line_break_index = [];
     let new_run_arr = [];
     for (let index = 0; index < run_arr.length; ++ index) {
-        if (!run_arr[index]["w:t"][0].hasOwnProperty("_")) {
+        if (!run_arr[index].hasOwnProperty("w:t") || run_arr[index].length === 0 || !run_arr[index]["w:t"][0].hasOwnProperty("_")) {
             new_run_arr.push(run_arr[index]);
             continue;
         }
@@ -179,7 +208,220 @@ let run_arr_process_for_html_paragraph_split = function (run_arr, data, opt) {
     return new_run_arr;
 }
 
-let replace_html_tag = function (run, data, opt) {
+let replace_html_img = async function (run, data, opt) {
+    if (!run.hasOwnProperty("w:t") || run["w:t"].length === 0 || !run["w:t"][0].hasOwnProperty("_")) {
+        return [run];
+    }
+    let new_run_arr = [];
+    let matched_arr = run["w:t"][0]["_"].match(/(<img\ssrc=).*?(\/>)/g);
+    if (!matched_arr) {
+        new_run_arr.push(run);
+        return [run];
+    }
+
+    let left_pos = run["w:t"][0]["_"].indexOf(matched_arr[0]);
+    let left = run["w:t"][0]["_"].substring(0, left_pos);
+    let right_pos = left_pos + matched_arr[0].length;
+    let right = run["w:t"][0]["_"].substring(right_pos);
+
+    // for left
+    if (left !== "") {
+        let run_tmp = {};
+        if (run.hasOwnProperty("w:rPr")) {
+            run_tmp["w:rPr"] = JSON.parse(JSON.stringify(run["w:rPr"]));
+        }
+        run_tmp["w:t"] = [{"_": left}];
+        new_run_arr.push(run_tmp);
+    }
+
+    // for middle matched
+    let run_tmp = {};
+    run_tmp["w:rPr"] = [{"w:noProof":[""]}]
+
+    let src = matched_arr[0].match(/(?<=src=").*?(?="\s)/g);
+    let img_filename = "";
+    let rid = "rId" + (opt["document_rels_obj"]["Relationships"]["Relationship"].length + 1).toString();
+    if (src !== undefined && src.length > 0) {
+        let [err, buf_image] = await download(src[0]);
+        img_filename = uuid.v4();
+        opt["zip"].addFile("word/media/" + img_filename + ".jpeg", Buffer.from(buf_image, "binary"));
+        opt["document_rels_obj"]["Relationships"]["Relationship"].push({
+            "$": {
+                Id: rid,
+                Type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+                Target: "media/" + img_filename + ".jpeg"
+            }
+        });
+    }
+
+    run_tmp["w:drawing"] = [
+        {
+            "wp:inline": [
+                {
+                    "$": {
+                        "distT": "0",
+                        "distB": "0",
+                        "distL": "0",
+                        "distR": "0",
+                        "wp14:anchorId": "6406A3DD",
+                        "wp14:editId": "6DC94A05"
+                    },
+                    "wp:extent": [
+                        {
+                            "$": {
+                                "cx": "2960691",
+                                "cy": "3262243"
+                            }
+                        }
+                    ],
+                    "wp:effectExtent": [
+                        {
+                            "$": {
+                                "l": "0",
+                                "t": "0",
+                                "r": "0",
+                                "b": "0"
+                            }
+                        }
+                    ],
+                    "wp:docPr": [
+                        {
+                            "$": {
+                                "id": opt["img_index"].toString(),
+                                "name": "图片 " + opt["img_index"].toString()
+                            }
+                        }
+                    ],
+                    "wp:cNvGraphicFramePr": [
+                        {
+                            "a:graphicFrameLocks": [
+                                {
+                                    "$": {
+                                        "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+                                        "noChangeAspect": "1"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    "a:graphic": [
+                        {
+                            "$": {
+                                "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main"
+                            },
+                            "a:graphicData": [
+                                {
+                                    "$": {
+                                        "uri": "http://schemas.openxmlformats.org/drawingml/2006/picture"
+                                    },
+                                    "pic:pic": [
+                                        {
+                                            "$": {
+                                                "xmlns:pic": "http://schemas.openxmlformats.org/drawingml/2006/picture"
+                                            },
+                                            "pic:nvPicPr": [
+                                                {
+                                                    "pic:cNvPr": [
+                                                        {
+                                                            "$": {
+                                                                "id": opt["img_index"].toString(),
+                                                                "name": ""
+                                                            }
+                                                        }
+                                                    ],
+                                                    "pic:cNvPicPr": [
+                                                        ""
+                                                    ]
+                                                }
+                                            ],
+                                            "pic:blipFill": [
+                                                {
+                                                    "a:blip": [
+                                                        {
+                                                            "$": {
+                                                                "r:embed": rid
+                                                            }
+                                                        }
+                                                    ],
+                                                    "a:stretch": [
+                                                        {
+                                                            "a:fillRect": [
+                                                                ""
+                                                            ]
+                                                        }
+                                                    ]
+                                                }
+                                            ],
+                                            "pic:spPr": [
+                                                {
+                                                    "a:xfrm": [
+                                                        {
+                                                            "a:off": [
+                                                                {
+                                                                    "$": {
+                                                                        "x": "0",
+                                                                        "y": "0"
+                                                                    }
+                                                                }
+                                                            ],
+                                                            "a:ext": [
+                                                                {
+                                                                    "$": {
+                                                                        "cx": "2965692",
+                                                                        "cy": "3267753"
+                                                                    }
+                                                                }
+                                                            ]
+                                                        }
+                                                    ],
+                                                    "a:prstGeom": [
+                                                        {
+                                                            "$": {
+                                                                "prst": "rect"
+                                                            },
+                                                            "a:avLst": [
+                                                                ""
+                                                            ]
+                                                        }
+                                                    ]
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+
+    new_run_arr.push(run_tmp);
+
+    // for right
+    let right_run_arr = [];
+    if (right !== "") {
+        run["w:t"][0]["_"] = right;
+        opt["img_index"] += 1;
+        right_run_arr = await replace_html_img(run, data, opt);
+        new_run_arr = new_run_arr.concat(right_run_arr);
+    }
+    return new_run_arr;
+}
+
+let run_arr_process_for_html_img = async function (run_arr, data, opt) {
+    console.log(run_arr);
+    let new_run_arr = [];
+    for (let index = 0; index < run_arr.length; ++ index) {
+        opt["img_index"] = 1;
+        let new_run_arr_tmp = await replace_html_img(run_arr[index], data, opt);
+        new_run_arr = new_run_arr.concat(new_run_arr_tmp);
+    }
+    return new_run_arr;
+}
+
+let replace_html_u = async function (run, data, opt) {
     if (!run.hasOwnProperty("w:t") || run["w:t"].length === 0 || !run["w:t"][0].hasOwnProperty("_")) {
         return [run];
     }
@@ -203,7 +445,6 @@ let replace_html_tag = function (run, data, opt) {
         }
         run_tmp["w:t"] = [{"_": left}];
         new_run_arr.push(run_tmp);
-        run_tmp = undefined;
     }
 
     // for middle matched
@@ -234,16 +475,16 @@ let replace_html_tag = function (run, data, opt) {
     let right_run_arr = [];
     if (right !== "") {
         run["w:t"][0]["_"] = right;
-        right_run_arr = replace_html_tag(run, data, opt);
+        right_run_arr = await replace_html_u(run, data, opt);
         new_run_arr = new_run_arr.concat(right_run_arr);
     }
     return new_run_arr;
 }
 
-let run_arr_process_for_html_tag = function (run_arr, data, opt) {
+let run_arr_process_for_html_tag = async function (run_arr, data, opt) {
     let new_run_arr = [];
     for (let index = 0; index < run_arr.length; ++ index) {
-        let new_run_arr_tmp = replace_html_tag(run_arr[index], data, opt);
+        let new_run_arr_tmp = await replace_html_u(run_arr[index], data, opt);
         new_run_arr = new_run_arr.concat(new_run_arr_tmp);
     }
     return new_run_arr;
@@ -258,7 +499,7 @@ let run_arr_process_for_html_tag = function (run_arr, data, opt) {
 // }
 
 // 检查每一个run，合并属性一样的run，产生新的数组
-let run_arr_process_merge_runs_by_rPr = function (run_arr, data, opt) {
+let run_arr_process_merge_runs_by_rPr = async function (run_arr, data, opt) {
     let new_run_arr = [run_arr[0]];
     for (let index = 1; index < run_arr.length; ++ index) {
         if (!cmp_run_rPr(new_run_arr[new_run_arr.length - 1], run_arr[index])) {
@@ -286,12 +527,36 @@ let cmp_run_rPr = function (run_a, run_b) {
     return cmp_rPr(run_a["w:rPr"], run_b["w:rPr"]);
 }
 
-let cmp_rPr = function (rPr_a_arr, rPr_b_arr) {
-    if (rPr_a_arr === undefined && rPr_b_arr === undefined) {
+let rPr_is_empty = function (rPr) {
+    if (rPr === undefined || rPr.length == 0 || Object.keys(rPr[0]).length == 0) {
         return true;
     }
+    return false;
+}
 
-    if (rPr_a_arr === undefined || rPr_b_arr === undefined) {
+let clear_rPr = function (rPr) {
+    try {
+        delete rPr[0]["w:rFonts"][0]["$"]["w:hint"];
+    }
+    catch (e) {}
+    try {
+        if (Object.keys(rPr[0]["w:rFonts"][0]["$"]).length == 0) {
+            delete rPr[0]["w:rFonts"];
+        }
+    } catch (e) {}
+    try {
+        delete rPr[0]["w:lang"];
+    }
+    catch (e) {}
+}
+
+let cmp_rPr = function (rPr_a_arr, rPr_b_arr) {
+    clear_rPr(rPr_a_arr);
+    clear_rPr(rPr_b_arr);
+    if (rPr_is_empty(rPr_a_arr) && (rPr_is_empty(rPr_b_arr))) {
+        return true;
+    }
+    if (rPr_is_empty(rPr_a_arr) + rPr_is_empty(rPr_b_arr) == 1) {
         return false;
     }
 
@@ -417,7 +682,7 @@ let render_docx = async function (template, data, opt){
     });
 
     // 先合并相同的run
-    body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
+    await body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
         run_arr_process: run_arr_process_merge_runs_by_rPr
     });
 
@@ -436,29 +701,44 @@ let render_docx = async function (template, data, opt){
     document_obj = await parser.parseStringPromise(document_xml).then(function (result) {
         return result;
     });
-    body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
+    await body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
         paragraph_arr_process: paragraph_arr_process_for_html_paragraph_split,
         run_arr_process: run_arr_process_for_html_paragraph_split
     });
 
-    // 解析内容中的html<u>字符
-    body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
+    // 处理内容中的html<u>字符
+    await body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
         run_arr_process: run_arr_process_for_html_tag
     });
 
+    // 处理内容中的html<img>图片
+    let document_rels_xml = zip.readAsText("word/_rels/document.xml.rels");
+    let document_rels_obj = await parser.parseStringPromise(document_rels_xml).then(function (result) {
+        return result;
+    });
+    let content_types_xml = zip.readAsText("[Content_Types].xml");
+    let content_types_obj = await parser.parseStringPromise(content_types_xml).then(function (result) {
+        return result;
+    });
+    opt["document_rels_obj"] = document_rels_obj;
+    opt["zip"] = zip;
+    await body_arr_process(document_obj["w:document"]["w:body"], data, opt, {
+        run_arr_process: run_arr_process_for_html_img
+    });
+    content_types_obj["Types"]["Default"].push({
+        "$":{Extension: "png", ContentType: "image/png"}
+    });
+    content_types_obj["Types"]["Default"].push({
+        "$":{Extension: "jpeg", ContentType: "image/jpeg"}
+    });
     document_xml = xml2js_builder.buildObject(document_obj);
-    // download image
-    // let [err, buf_image] = await utils.download("https://pics1.baidu.com/feed/9d82d158ccbf6c8176395c9eed85af3b32fa4087.jpeg");
-    // if (err) {
-    //     return res.send({"errno": 1, "message": "No files were uploaded."});
-    // }
-    // zip.addFile("word/media/download.jpeg", Buffer.from(buf_image, "binary"));
-
-    // build document_xml
-
+    document_rels_xml = xml2js_builder.buildObject(opt["document_rels_obj"]);
+    content_types_xml = xml2js_builder.buildObject(content_types_obj);
 
     // update document_xml
+    zip.updateFile("word/_rels/document.xml.rels", document_rels_xml);
     zip.updateFile("word/document.xml", document_xml);
+    zip.updateFile("[Content_Types].xml", content_types_xml);
     // zip.addLocalFile("/home/zhangke/Myprojects/gostudy-server/zk.jpeg", "word/media");
     return zip.toBuffer();
     // return new Promise((resolve, reject) => {
