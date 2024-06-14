@@ -217,38 +217,53 @@ let run_arr_process_for_html_paragraph_split = async function (run_arr, data, op
             continue;
         }
 
-        let pos = run_arr[index]["w:t"][0]["_"].indexOf("<p>");
-        let left = run_arr[index]["w:t"][0]["_"].substring(0, pos);
-        pos = run_arr[index]["w:t"][0]["_"].lastIndexOf("<\/p>");
-        let right = run_arr[index]["w:t"][0]["_"].substring(pos + "<\/p>".length);
-
-        if (left !== "") {
+        let text_arr = run_arr[index]["w:t"][0]["_"].split('</p><p>');
+        for (let i = 0; i < text_arr.length; ++ i) {
+            let text = text_arr[i].replaceAll('<p>', "").replaceAll('</p>', "").replaceAll('&nbsp;', ' ');
             let run = {};
             if (run_arr[index].hasOwnProperty("w:rPr")) {
                 run["w:rPr"] = run_arr[index]["w:rPr"];
             }
-            run["w:t"] = [{"_": left}];
-            new_run_arr.push(run);
-        }
-        for (let i = 0; i < matched_arr.length; ++ i) {
-            let run = {};
-            if (run_arr[index].hasOwnProperty("w:rPr")) {
-                run["w:rPr"] = run_arr[index]["w:rPr"];
-            }
-            run["w:t"] = [{"_": matched_arr[i]}];
-            if (i < matched_arr.length - 1) {
+            run["w:t"] = [{"_": text}];
+            if (i < text_arr.length - 1) {
                 run["line_break"] = true;
             }
             new_run_arr.push(run);
         }
-        if (right !== "") {
-            let run = {};
-            if (run_arr[index].hasOwnProperty("w:rPr")) {
-                run["w:rPr"] = run_arr[index]["w:rPr"];
-            }
-            run["w:t"] = [right];
-            new_run_arr.push(run);
-        }
+
+        //
+        // let pos = run_arr[index]["w:t"][0]["_"].indexOf("<p>");
+        // let left = run_arr[index]["w:t"][0]["_"].substring(0, pos);
+        // pos = run_arr[index]["w:t"][0]["_"].lastIndexOf("<\/p>");
+        // let right = run_arr[index]["w:t"][0]["_"].substring(pos + "<\/p>".length);
+        //
+        // if (left !== "") {
+        //     let run = {};
+        //     if (run_arr[index].hasOwnProperty("w:rPr")) {
+        //         run["w:rPr"] = run_arr[index]["w:rPr"];
+        //     }
+        //     run["w:t"] = [{"_": left}];
+        //     new_run_arr.push(run);
+        // }
+        // for (let i = 0; i < matched_arr.length; ++ i) {
+        //     let run = {};
+        //     if (run_arr[index].hasOwnProperty("w:rPr")) {
+        //         run["w:rPr"] = run_arr[index]["w:rPr"];
+        //     }
+        //     run["w:t"] = [{"_": matched_arr[i]}];
+        //     if (i < matched_arr.length - 1) {
+        //         run["line_break"] = true;
+        //     }
+        //     new_run_arr.push(run);
+        // }
+        // if (right !== "") {
+        //     let run = {};
+        //     if (run_arr[index].hasOwnProperty("w:rPr")) {
+        //         run["w:rPr"] = run_arr[index]["w:rPr"];
+        //     }
+        //     run["w:t"] = [right];
+        //     new_run_arr.push(run);
+        // }
     }
     return new_run_arr;
 }
