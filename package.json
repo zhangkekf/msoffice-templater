@@ -38,6 +38,8 @@
   "license": "GPL-3.0",
   "dependencies": {
     "adm-zip": "^0.5.14",
+    "canvas": "^2.11.2",
+    "image-size": "^1.1.1",
     "uuid": "^10.0.0",
     "xml2js": "^0.6.2"
   }

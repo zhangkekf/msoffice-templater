@@ -4,11 +4,47 @@ const util =  require('node:util');
 const https = require('https');
 const http = require('http');
 const uuid = require('uuid');
+const image_size = require('image-size');
 const default_opt = {
     delimiter: ["{{", "}}"],
     line_break_index: []
 }
-async function download(url) {
+
+// async function download_img(url) {
+//     return new Promise((resolve, reject) => {
+//         let http_sender;
+//         if (url.substring(0, "https".length) === "https") {
+//             http_sender = https;
+//         } else {
+//             http_sender = http;
+//         }
+//         http_sender.get(url, (res) => {
+//             let image_data_arr = [];
+//             // res.setEncoding("binary");
+//             // res.setEncoding("utf8");
+//             res.on('data', (chunk) => {
+//                 image_data_arr.push(chunk);
+//             });
+//             res.on('end', () => {
+//                 // 以Unit8Array的格式，来读取图片的宽高
+//                 let buffer = Buffer.concat(image_data_arr)
+//                 console.log(image_size(buffer));
+//
+//                 // 再转换成二进制来存放本地
+//                 buffer = Buffer.from(buffer.buffer);
+//                 return resolve(buffer);
+//             });
+//         }).on("error", function () {
+//             reject("error");
+//         });
+//     }).then(data => {
+//         return [null, data];
+//     }).catch(error => {
+//         return [error, null];
+//     })
+// }
+
+async function download_img(url) {
     return new Promise((resolve, reject) => {
         let http_sender;
         if (url.substring(0, "https".length) === "https") {
@@ -17,13 +53,21 @@ async function download(url) {
             http_sender = http;
         }
         http_sender.get(url, (res) => {
-            let image_data = "";
+            let image_data = [];
             res.setEncoding("binary");
+            // res.setEncoding("utf8");
             res.on('data', (chunk) => {
                 image_data += chunk;
             });
             res.on('end', () => {
-                return resolve(image_data);
+                const uint8Array = new Uint8Array(image_data.length);
+                for (let i = 0; i < image_data.length; i++) {
+                    uint8Array[i] = image_data.charCodeAt(i);
+                }
+                return resolve({
+                    image_data: image_data,
+                    info: image_size(uint8Array)
+                });
             });
         }).on("error", function () {
             reject("error");
@@ -34,6 +78,7 @@ async function download(url) {
         return [error, null];
     })
 }
+
 function escapeXml(unsafe) {
     unsafe = unsafe.toString();
     return unsafe.replace(/[<>&'"]/g, function (c) {
@@ -242,9 +287,18 @@ let replace_html_img = async function (run, data, opt) {
     let img_filename = "";
     let rid = "rId" + (opt["document_rels_obj"]["Relationships"]["Relationship"].length + 1).toString();
     if (src !== undefined && src.length > 0) {
-        let [err, buf_image] = await download(src[0]);
+        let width = matched_arr[0].match(/(?<=width:\s).*?(?=%)/g);
+        if (width === undefined) {
+            width = 100;
+        } else {
+            width = Number(width[0]);
+        }
+
+        let [err, image] = await download_img(src[0]);
+        image.info.width = parseInt(image.info.width * 8325 * width / 100).toString();
+        image.info.height = parseInt(image.info.height * 8325 * width / 100).toString();
         img_filename = uuid.v4();
-        opt["zip"].addFile("word/media/" + img_filename + ".jpeg", Buffer.from(buf_image, "binary"));
+        opt["zip"].addFile("word/media/" + img_filename + ".jpeg", Buffer.from(image.image_data, "binary"));
         opt["document_rels_obj"]["Relationships"]["Relationship"].push({
             "$": {
                 Id: rid,
@@ -252,152 +306,152 @@ let replace_html_img = async function (run, data, opt) {
                 Target: "media/" + img_filename + ".jpeg"
             }
         });
+        run_tmp["w:drawing"] = [
+            {
+                "wp:inline": [
+                    {
+                        "$": {
+                            "distT": "0",
+                            "distB": "0",
+                            "distL": "0",
+                            "distR": "0",
+                            "wp14:anchorId": "6406A3DD",
+                            "wp14:editId": "6DC94A05"
+                        },
+                        "wp:extent": [
+                            {
+                                "$": {
+                                    "cx": image.info.width,
+                                    "cy": image.info.height
+                                }
+                            }
+                        ],
+                        "wp:effectExtent": [
+                            {
+                                "$": {
+                                    "l": "0",
+                                    "t": "0",
+                                    "r": "0",
+                                    "b": "0"
+                                }
+                            }
+                        ],
+                        "wp:docPr": [
+                            {
+                                "$": {
+                                    "id": opt["img_index"].toString(),
+                                    "name": "图片 " + opt["img_index"].toString()
+                                }
+                            }
+                        ],
+                        "wp:cNvGraphicFramePr": [
+                            {
+                                "a:graphicFrameLocks": [
+                                    {
+                                        "$": {
+                                            "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+                                            "noChangeAspect": "1"
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                        "a:graphic": [
+                            {
+                                "$": {
+                                    "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main"
+                                },
+                                "a:graphicData": [
+                                    {
+                                        "$": {
+                                            "uri": "http://schemas.openxmlformats.org/drawingml/2006/picture"
+                                        },
+                                        "pic:pic": [
+                                            {
+                                                "$": {
+                                                    "xmlns:pic": "http://schemas.openxmlformats.org/drawingml/2006/picture"
+                                                },
+                                                "pic:nvPicPr": [
+                                                    {
+                                                        "pic:cNvPr": [
+                                                            {
+                                                                "$": {
+                                                                    "id": opt["img_index"].toString(),
+                                                                    "name": ""
+                                                                }
+                                                            }
+                                                        ],
+                                                        "pic:cNvPicPr": [
+                                                            ""
+                                                        ]
+                                                    }
+                                                ],
+                                                "pic:blipFill": [
+                                                    {
+                                                        "a:blip": [
+                                                            {
+                                                                "$": {
+                                                                    "r:embed": rid
+                                                                }
+                                                            }
+                                                        ],
+                                                        "a:stretch": [
+                                                            {
+                                                                "a:fillRect": [
+                                                                    ""
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ],
+                                                "pic:spPr": [
+                                                    {
+                                                        "a:xfrm": [
+                                                            {
+                                                                "a:off": [
+                                                                    {
+                                                                        "$": {
+                                                                            "x": "0",
+                                                                            "y": "0"
+                                                                        }
+                                                                    }
+                                                                ],
+                                                                "a:ext": [
+                                                                    {
+                                                                        "$": {
+                                                                            "cx": image.info.width,
+                                                                            "cy": image.info.height
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ],
+                                                        "a:prstGeom": [
+                                                            {
+                                                                "$": {
+                                                                    "prst": "rect"
+                                                                },
+                                                                "a:avLst": [
+                                                                    ""
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+
+        new_run_arr.push(run_tmp);
     }
 
-    run_tmp["w:drawing"] = [
-        {
-            "wp:inline": [
-                {
-                    "$": {
-                        "distT": "0",
-                        "distB": "0",
-                        "distL": "0",
-                        "distR": "0",
-                        "wp14:anchorId": "6406A3DD",
-                        "wp14:editId": "6DC94A05"
-                    },
-                    "wp:extent": [
-                        {
-                            "$": {
-                                "cx": "2960691",
-                                "cy": "3262243"
-                            }
-                        }
-                    ],
-                    "wp:effectExtent": [
-                        {
-                            "$": {
-                                "l": "0",
-                                "t": "0",
-                                "r": "0",
-                                "b": "0"
-                            }
-                        }
-                    ],
-                    "wp:docPr": [
-                        {
-                            "$": {
-                                "id": opt["img_index"].toString(),
-                                "name": "图片 " + opt["img_index"].toString()
-                            }
-                        }
-                    ],
-                    "wp:cNvGraphicFramePr": [
-                        {
-                            "a:graphicFrameLocks": [
-                                {
-                                    "$": {
-                                        "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main",
-                                        "noChangeAspect": "1"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    "a:graphic": [
-                        {
-                            "$": {
-                                "xmlns:a": "http://schemas.openxmlformats.org/drawingml/2006/main"
-                            },
-                            "a:graphicData": [
-                                {
-                                    "$": {
-                                        "uri": "http://schemas.openxmlformats.org/drawingml/2006/picture"
-                                    },
-                                    "pic:pic": [
-                                        {
-                                            "$": {
-                                                "xmlns:pic": "http://schemas.openxmlformats.org/drawingml/2006/picture"
-                                            },
-                                            "pic:nvPicPr": [
-                                                {
-                                                    "pic:cNvPr": [
-                                                        {
-                                                            "$": {
-                                                                "id": opt["img_index"].toString(),
-                                                                "name": ""
-                                                            }
-                                                        }
-                                                    ],
-                                                    "pic:cNvPicPr": [
-                                                        ""
-                                                    ]
-                                                }
-                                            ],
-                                            "pic:blipFill": [
-                                                {
-                                                    "a:blip": [
-                                                        {
-                                                            "$": {
-                                                                "r:embed": rid
-                                                            }
-                                                        }
-                                                    ],
-                                                    "a:stretch": [
-                                                        {
-                                                            "a:fillRect": [
-                                                                ""
-                                                            ]
-                                                        }
-                                                    ]
-                                                }
-                                            ],
-                                            "pic:spPr": [
-                                                {
-                                                    "a:xfrm": [
-                                                        {
-                                                            "a:off": [
-                                                                {
-                                                                    "$": {
-                                                                        "x": "0",
-                                                                        "y": "0"
-                                                                    }
-                                                                }
-                                                            ],
-                                                            "a:ext": [
-                                                                {
-                                                                    "$": {
-                                                                        "cx": "2965692",
-                                                                        "cy": "3267753"
-                                                                    }
-                                                                }
-                                                            ]
-                                                        }
-                                                    ],
-                                                    "a:prstGeom": [
-                                                        {
-                                                            "$": {
-                                                                "prst": "rect"
-                                                            },
-                                                            "a:avLst": [
-                                                                ""
-                                                            ]
-                                                        }
-                                                    ]
-                                                }
-                                            ]
-                                        }
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-    ]
-
-    new_run_arr.push(run_tmp);
 
     // for right
     let right_run_arr = [];
