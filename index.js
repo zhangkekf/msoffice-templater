@@ -179,6 +179,7 @@ let paragraph_arr_process_for_html_paragraph_split = async function (paragraph_a
         }
         if (new_run_arr.length > 0) {
             new_paragraph_arr.push({
+                "w:pPr": paragraph_obj["w:pPr"],
                 "w:r": new_run_arr
             });
         }
@@ -480,7 +481,6 @@ let replace_html_img = async function (run, data, opt) {
 }
 
 let run_arr_process_for_html_img = async function (run_arr, data, opt) {
-    console.log(run_arr);
     let new_run_arr = [];
     for (let index = 0; index < run_arr.length; ++ index) {
         opt["img_index"] = 1;
@@ -571,6 +571,7 @@ let run_arr_process_for_html_tag = async function (run_arr, data, opt) {
 let run_arr_process_merge_runs_by_rPr = async function (run_arr, data, opt) {
     let new_run_arr = [run_arr[0]];
     for (let index = 1; index < run_arr.length; ++ index) {
+
         if (!cmp_run_rPr(new_run_arr[new_run_arr.length - 1], run_arr[index])) {
             new_run_arr.push(run_arr[index]);
             continue;
@@ -593,6 +594,9 @@ let run_arr_process_merge_runs_by_rPr = async function (run_arr, data, opt) {
 }
 
 let cmp_run_rPr = function (run_a, run_b) {
+    if (!run_a.hasOwnProperty("w:t") && !run_b.hasOwnProperty("w:t")) {
+        return false;
+    }
     return cmp_rPr(run_a["w:rPr"], run_b["w:rPr"]);
 }
 
@@ -806,8 +810,14 @@ let render_docx = async function (template, data, opt){
 
     // update document_xml
     zip.updateFile("word/_rels/document.xml.rels", document_rels_xml);
-    zip.updateFile("word/document.xml", document_xml);
     zip.updateFile("[Content_Types].xml", content_types_xml);
+
+    // 替换其中的重复id的值
+    let next_id = 10000;
+    document_xml = document_xml.replaceAll(/(?<=<wp:docPr\sid=\")\d{1,}(?=\")/g, function(x) {
+        return next_id ++;
+    });
+    zip.updateFile("word/document.xml", document_xml);
     // zip.addLocalFile("/home/zhangke/Myprojects/gostudy-server/zk.jpeg", "word/media");
     return zip.toBuffer();
     // return new Promise((resolve, reject) => {
